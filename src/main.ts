@@ -104,7 +104,6 @@ const guidePoints = {
     zMinus: new THREE.Vector3(0, 0, -FIELD_DEPTH / 2 - 1),
 };
 
-// --- キーボード操作 ---
 document.addEventListener('keydown', (event) => {
     const halfWidth = (FIELD_WIDTH - 1) / 2;
     const halfDepth = (FIELD_DEPTH - 1) / 2;
@@ -132,6 +131,79 @@ document.addEventListener('keydown', (event) => {
             break;
     }
 });
+
+function handleMovement(key: string) {
+    const halfWidth = (FIELD_WIDTH - 1) / 2;
+    const halfDepth = (FIELD_DEPTH - 1) / 2;
+
+    let moved = false;
+    switch (key) {
+        case 'ArrowLeft':
+            if (currentPiece.position.x > -halfWidth) currentPiece.position.x -= 1;
+            break;
+        case 'ArrowRight':
+            if (currentPiece.position.x < halfWidth) currentPiece.position.x += 1;
+            break;
+        case 'ArrowUp':
+            if (currentPiece.position.z > -halfDepth) currentPiece.position.z -= 1;
+            break;
+        case 'ArrowDown':
+            if (currentPiece.position.z < halfDepth) currentPiece.position.z += 1;
+            break;
+    }
+}
+
+function handleRotation(key: string) {
+    const rotationMatrix = new THREE.Matrix4();
+    const angle = Math.PI / 2; // 90度
+
+    switch (key.toLowerCase()) {
+        case 'a': // Y軸回転
+            rotationMatrix.makeRotationY(angle);
+            break;
+        case 's': // Y軸逆回転
+            rotationMatrix.makeRotationY(-angle);
+            break;
+        case 'z': // X軸回転
+            rotationMatrix.makeRotationX(angle);
+            break;
+        case 'x': // X軸逆回転
+            rotationMatrix.makeRotationX(-angle);
+            break;
+        case 'q': // Z軸回転
+            rotationMatrix.makeRotationZ(angle);
+            break;
+        case 'w': // Z軸逆回転
+            rotationMatrix.makeRotationZ(-angle);
+            break;
+        default:
+            return; // 回転キーでなければ終了
+    }
+
+    // 回転を適用
+    currentPiece.applyMatrix4(rotationMatrix);
+
+    // 壁チェック
+    if (!isPieceInsideField()) {
+        // 壁を越えたら回転を元に戻す
+        const inverseMatrix = rotationMatrix.invert();
+        currentPiece.applyMatrix4(inverseMatrix);
+    }
+}
+
+function isPieceInsideField(): boolean {
+    const halfWidth = (FIELD_WIDTH - 1) / 2;
+    const halfDepth = (FIELD_DEPTH - 1) / 2;
+
+    for (const dango of currentPiece.children) {
+        const worldPos = dango.getWorldPosition(new THREE.Vector3());
+        if (Math.abs(worldPos.x) > halfWidth || Math.abs(worldPos.z) > halfDepth) {
+            return false; // 壁の外に出た
+        }
+    }
+    return true;
+}
+
 
 // --- ウィンドウリサイズ対応 ---
 window.addEventListener('resize', () => {
