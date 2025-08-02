@@ -1,0 +1,22 @@
+{
+  "name": "dango",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "three": "^0.179.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.178.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.0.6"
+  }
+}

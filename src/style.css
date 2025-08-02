@@ -1,0 +1,22 @@
+body {
+    margin: 0;
+    overflow: hidden;
+}
+
+#game-canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+}
+
+#controls-helper div {
+    position: absolute;
+    font-size: 20px;
+    font-family: monospace;
+    color: rgba(0, 0, 0, 0.7);
+    padding: 10px;
+    background-color: rgba(255, 255, 255, 0.8);
+    border-radius: 5px;
+    transform: translate(-50%, -50%); /* 中央揃え */
+    pointer-events: none;
+}
