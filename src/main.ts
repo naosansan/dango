@@ -6,6 +6,23 @@ const FIELD_WIDTH = 9;
 const FIELD_HEIGHT = 20;
 const FIELD_DEPTH = 3;
 
+let lastFallTime = 0;
+const FALL_INTERVAL = 1000; // ms (1秒に1マス落下)
+const SOFT_DROP_MULTIPLIER = 5; // ソフトドロップ時の落下速度倍率
+let isSoftDropping = false;
+
+// --- ゲームフィールドのグリッドデータ ---
+const fieldGrid: (THREE.Mesh | null)[][][] = [];
+for (let x = 0; x < FIELD_WIDTH; x++) {
+    fieldGrid[x] = [];
+    for (let y = 0; y < FIELD_HEIGHT; y++) {
+        fieldGrid[x][y] = [];
+        for (let z = 0; z < FIELD_DEPTH; z++) {
+            fieldGrid[x][y][z] = null;
+        }
+    }
+}
+
 // --- シーン設定 ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf0f0f0);
@@ -91,8 +108,8 @@ function createDangoPiece() {
 }
 
 // --- 最初のピースを作成して配置 ---
-const currentPiece = createDangoPiece();
-currentPiece.position.set(0, FIELD_HEIGHT / 2 - 2, 0); // フィールド上部中央に配置
+let currentPiece = createDangoPiece();
+currentPiece.position.set(0, FIELD_HEIGHT / 2 - 1, 0); // フィールド上部中央に配置
 scene.add(currentPiece);
 
 // --- UI要素の取得 ---
@@ -113,6 +130,16 @@ document.addEventListener('keydown', (event) => {
     // 移動と回転で別々に処理
     handleMovement(event.key);
     handleRotation(event.key);
+
+    if (event.key === ' ') { // スペースキー
+        isSoftDropping = true;
+    }
+});
+
+document.addEventListener('keyup', (event) => {
+    if (event.key === ' ') { // スペースキー
+        isSoftDropping = false;
+    }
 });
 
 // --- 移動処理 ---
@@ -201,6 +228,78 @@ function isPieceInsideField(): boolean {
     return true;
 }
 
+// --- ピースをフィールドに固定する ---
+function lockPiece() {
+    // currentPieceから個々のだんごを取り外し、シーンに直接追加
+    // その際、だんごのワールド座標を正確に設定する
+    const dangosToLock: THREE.Mesh[] = [];
+    while (currentPiece.children.length > 0) {
+        const dango = currentPiece.children[0] as THREE.Mesh;
+        
+        // だんごの現在のワールド座標を取得
+        const worldPos = dango.getWorldPosition(new THREE.Vector3());
+
+        // currentPieceからだんごを削除
+        currentPiece.remove(dango);
+        
+        // だんごのpositionをワールド座標に設定し、グリッドにスナップさせる
+        dango.position.copy(worldPos);
+        dango.position.x = Math.round(dango.position.x);
+        dango.position.y = Math.round(dango.position.y);
+        dango.position.z = Math.round(dango.position.z);
+
+        // シーンに直接追加
+        scene.add(dango);
+        dangosToLock.push(dango);
+    }
+
+    // fieldGridにだんごを登録
+    for (const dango of dangosToLock) {
+        const x = Math.round(dango.position.x + FIELD_WIDTH / 2 - 0.5);
+        const y = Math.round(dango.position.y + FIELD_HEIGHT / 2 - 0.5);
+        const z = Math.round(dango.position.z + FIELD_DEPTH / 2 - 0.5);
+
+        // 座標がグリッド範囲内であることを確認してから登録
+        if (x >= 0 && x < FIELD_WIDTH && y >= 0 && y < FIELD_HEIGHT && z >= 0 && z < FIELD_DEPTH) {
+            fieldGrid[x][y][z] = dango;
+        } else {
+            console.warn("Locked dango out of grid bounds:", x, y, z);
+        }
+    }
+
+    // 新しいピースを生成して配置
+    currentPiece = createDangoPiece();
+    currentPiece.position.set(0, FIELD_HEIGHT / 2 - 1, 0); // 初期スポーン位置
+    scene.add(currentPiece);
+}
+
+// --- 衝突判定 ---
+function isCollision(piece: THREE.Group, dx = 0, dy = 0, dz = 0): boolean {
+    const halfWidth = FIELD_WIDTH / 2;
+    const halfDepth = FIELD_DEPTH / 2;
+    const halfHeight = FIELD_HEIGHT / 2;
+
+    for (const dango of piece.children) {
+        const worldPos = dango.getWorldPosition(new THREE.Vector3());
+        const nextX = Math.round(worldPos.x + dx + FIELD_WIDTH / 2 - 0.5);
+        const nextY = Math.round(worldPos.y + dy + FIELD_HEIGHT / 2 - 0.5);
+        const nextZ = Math.round(worldPos.z + dz + FIELD_DEPTH / 2 - 0.5);
+
+        // フィールドの境界チェック
+        if (nextX < 0 || nextX >= FIELD_WIDTH ||
+            nextY < 0 || nextY >= FIELD_HEIGHT ||
+            nextZ < 0 || nextZ >= FIELD_DEPTH) {
+            return true; // 境界外は衝突とみなす
+        }
+
+        // 既存のだんごとの衝突チェック
+        if (fieldGrid[nextX][nextY][nextZ] !== null) {
+            return true; // 既存のだんごに衝突
+        }
+    }
+    return false;
+}
+
 
 // --- ウィンドウリサイズ対応 ---
 window.addEventListener('resize', () => {
@@ -210,9 +309,20 @@ window.addEventListener('resize', () => {
 });
 
 // --- アニメーションループ ---
-function animate() {
+function animate(currentTime: DOMHighResTimeStamp) {
   requestAnimationFrame(animate);
   controls.update(); // カメラコントロールを更新
+
+  // だんごの自動落下処理
+  const fallSpeed = isSoftDropping ? FALL_INTERVAL / SOFT_DROP_MULTIPLIER : FALL_INTERVAL;
+  if (currentTime - lastFallTime > fallSpeed) {
+      if (!isCollision(currentPiece, 0, -1, 0)) { // 1マス下に衝突しないかチェック
+          currentPiece.position.y -= 1; // 1マス落下
+      } else {
+          lockPiece(); // 衝突したら固定
+      }
+      lastFallTime = currentTime;
+  }
 
   // 3Dポイントを2Dスクリーン座標に変換してUIを更新
   const points = [guidePoints.xPlus, guidePoints.xMinus, guidePoints.zPlus, guidePoints.zMinus];
@@ -233,4 +343,4 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-animate();
+animate(0); // 初期呼び出し
