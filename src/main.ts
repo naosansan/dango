@@ -109,7 +109,7 @@ function createDangoPiece() {
 
 // --- 最初のピースを作成して配置 ---
 let currentPiece = createDangoPiece();
-currentPiece.position.set(0, FIELD_HEIGHT / 2 - 1, 0); // フィールド上部中央に配置
+currentPiece.position.set(0, FIELD_HEIGHT / 2 - 0.5, 0); // フィールド上部中央に配置
 scene.add(currentPiece);
 
 // --- UI要素の取得 ---
@@ -245,8 +245,7 @@ function lockPiece() {
         // だんごのpositionをワールド座標に設定し、グリッドにスナップさせる
         dango.position.copy(worldPos);
         dango.position.x = Math.round(dango.position.x);
-        dango.position.y = Math.round(dango.position.y);
-        dango.position.z = Math.round(dango.position.z);
+        dango.position.y = Math.round(dango.position.y * 2) / 2; // 0.5単位でスナップ
 
         // シーンに直接追加
         scene.add(dango);
@@ -269,7 +268,7 @@ function lockPiece() {
 
     // 新しいピースを生成して配置
     currentPiece = createDangoPiece();
-    currentPiece.position.set(0, FIELD_HEIGHT / 2 - 1, 0); // 初期スポーン位置
+    currentPiece.position.set(0, FIELD_HEIGHT / 2 - 0.5, 0); // 初期スポーン位置
     scene.add(currentPiece);
 }
 
