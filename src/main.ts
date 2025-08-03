@@ -75,8 +75,13 @@ const dangoGeometry = new THREE.SphereGeometry(0.5, 16, 16); // 半径0.5の球�
 
 function createDangoPiece() {
     const piece = new THREE.Group();
+    const availableColors = [...DANGO_COLORS]; // 利用可能な色のリストをコピー
+
     for (let i = 0; i < 3; i++) {
-        const color = DANGO_COLORS[Math.floor(Math.random() * DANGO_COLORS.length)];
+        const randomIndex = Math.floor(Math.random() * availableColors.length);
+        const color = availableColors[randomIndex];
+        availableColors.splice(randomIndex, 1); // 選んだ色をリストから削除
+
         const dangoMaterial = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3 });
         const dango = new THREE.Mesh(dangoGeometry, dangoMaterial);
         dango.position.y = i - 1; // 3つのだんごを縦に並べる
@@ -105,100 +110,92 @@ const guidePoints = {
 };
 
 document.addEventListener('keydown', (event) => {
-    const halfWidth = (FIELD_WIDTH - 1) / 2;
-    const halfDepth = (FIELD_DEPTH - 1) / 2;
-
-    switch (event.key) {
-        case 'ArrowLeft':
-            if (currentPiece.position.x > -halfWidth) {
-                currentPiece.position.x -= 1;
-            }
-            break;
-        case 'ArrowRight':
-            if (currentPiece.position.x < halfWidth) {
-                currentPiece.position.x += 1;
-            }
-            break;
-        case 'ArrowUp': // 奥へ移動
-            if (currentPiece.position.z > -halfDepth) {
-                currentPiece.position.z -= 1;
-            }
-            break;
-        case 'ArrowDown': // 手前へ移動
-            if (currentPiece.position.z < halfDepth) {
-                currentPiece.position.z += 1;
-            }
-            break;
-    }
+    // 移動と回転で別々に処理
+    handleMovement(event.key);
+    handleRotation(event.key);
 });
 
+// --- 移動処理 ---
 function handleMovement(key: string) {
-    const halfWidth = (FIELD_WIDTH - 1) / 2;
-    const halfDepth = (FIELD_DEPTH - 1) / 2;
+    const dx = (key === 'ArrowLeft') ? -1 : (key === 'ArrowRight') ? 1 : 0;
+    const dz = (key === 'ArrowUp') ? -1 : (key === 'ArrowDown') ? 1 : 0;
 
-    let moved = false;
-    switch (key) {
-        case 'ArrowLeft':
-            if (currentPiece.position.x > -halfWidth) currentPiece.position.x -= 1;
-            break;
-        case 'ArrowRight':
-            if (currentPiece.position.x < halfWidth) currentPiece.position.x += 1;
-            break;
-        case 'ArrowUp':
-            if (currentPiece.position.z > -halfDepth) currentPiece.position.z -= 1;
-            break;
-        case 'ArrowDown':
-            if (currentPiece.position.z < halfDepth) currentPiece.position.z += 1;
-            break;
+    if (dx === 0 && dz === 0) return;
+
+    // 移動後の位置を仮計算
+    currentPiece.position.x += dx;
+    currentPiece.position.z += dz;
+
+    // 移動後の位置がフィールド内かチェック
+    if (!isPieceInsideField()) {
+        // フィールド外なら元に戻す
+        currentPiece.position.x -= dx;
+        currentPiece.position.z -= dz;
     }
 }
 
+// --- 回転処理 ---
 function handleRotation(key: string) {
-    const rotationMatrix = new THREE.Matrix4();
-    const angle = Math.PI / 2; // 90度
+    const axis = new THREE.Vector3();
+    let angle = Math.PI / 2; // 90度
 
     switch (key.toLowerCase()) {
-        case 'a': // Y軸回転
-            rotationMatrix.makeRotationY(angle);
-            break;
-        case 's': // Y軸逆回転
-            rotationMatrix.makeRotationY(-angle);
-            break;
-        case 'z': // X軸回転
-            rotationMatrix.makeRotationX(angle);
-            break;
-        case 'x': // X軸逆回転
-            rotationMatrix.makeRotationX(-angle);
-            break;
-        case 'q': // Z軸回転
-            rotationMatrix.makeRotationZ(angle);
-            break;
-        case 'w': // Z軸逆回転
-            rotationMatrix.makeRotationZ(-angle);
-            break;
-        default:
-            return; // 回転キーでなければ終了
+        case 'a': axis.set(0, 1, 0); break; // Y軸
+        case 's': axis.set(0, 1, 0); angle = -angle; break;
+        case 'z': axis.set(1, 0, 0); break; // X軸
+        case 'x': axis.set(1, 0, 0); angle = -angle; break;
+        case 'q': axis.set(0, 0, 1); break; // Z軸
+        case 'w': axis.set(0, 0, 1); angle = -angle; break;
+        default: return; // 回転キーでなければ終了
     }
 
-    // 回転を適用
-    currentPiece.applyMatrix4(rotationMatrix);
+    // 回転前の各だんごのローカル位置を保存
+    const oldLocalPositions = currentPiece.children.map(dango => dango.position.clone());
 
-    // 壁チェック
+    // 各だんごのローカル位置を回転させる
+    for (const dango of currentPiece.children) {
+        dango.position.applyAxisAngle(axis, angle);
+        dango.position.round(); // 整数座標にスナップさせる
+    }
+
+    // 回転後に壁や床を突き抜けていないかチェック
     if (!isPieceInsideField()) {
-        // 壁を越えたら回転を元に戻す
-        const inverseMatrix = rotationMatrix.invert();
-        currentPiece.applyMatrix4(inverseMatrix);
+        // 突き抜けていたら回転を元に戻す
+        for (let i = 0; i < currentPiece.children.length; i++) {
+            currentPiece.children[i].position.copy(oldLocalPositions[i]);
+        }
     }
 }
 
-function isPieceInsideField(): boolean {
-    const halfWidth = (FIELD_WIDTH - 1) / 2;
-    const halfDepth = (FIELD_DEPTH - 1) / 2;
+// --- グローバル座標でのだんごの位置を取得 ---
+function getDangoWorldPositions(piece: THREE.Group): THREE.Vector3[] {
+    const positions: THREE.Vector3[] = [];
+    for (const dango of piece.children) {
+        positions.push(dango.getWorldPosition(new THREE.Vector3()));
+    }
+    return positions;
+}
 
-    for (const dango of currentPiece.children) {
-        const worldPos = dango.getWorldPosition(new THREE.Vector3());
-        if (Math.abs(worldPos.x) > halfWidth || Math.abs(worldPos.z) > halfDepth) {
-            return false; // 壁の外に出た
+// --- ピースがフィールド内にあるかチェック ---
+function isPieceInsideField(): boolean {
+    const halfWidth = FIELD_WIDTH / 2;
+    const halfDepth = FIELD_DEPTH / 2;
+    const halfHeight = FIELD_HEIGHT / 2;
+
+    const worldPositions = getDangoWorldPositions(currentPiece);
+
+    for (const pos of worldPositions) {
+        // X軸方向のチェック
+        if (pos.x < -halfWidth + 0.5 || pos.x > halfWidth - 0.5) {
+            return false;
+        }
+        // Z軸方向のチェック
+        if (pos.z < -halfDepth + 0.5 || pos.z > halfDepth - 0.5) {
+            return false;
+        }
+        // Y軸方向のチェック (床より下)
+        if (pos.y < -halfHeight + 0.5) {
+            return false;
         }
     }
     return true;
