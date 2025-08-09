@@ -107,10 +107,19 @@ function createDangoPiece() {
     return piece;
 }
 
-// --- 最初のピースを作成して配置 ---
-let currentPiece = createDangoPiece();
-currentPiece.position.set(0, FIELD_HEIGHT / 2 - 0.5, 0); // フィールド上部中央に配置
-scene.add(currentPiece);
+// --- ゲームの状態管理 ---
+let currentPiece: THREE.Group | null = null;
+let fallingDangos: THREE.Mesh[] = [];
+
+function spawnNewPiece() {
+    currentPiece = createDangoPiece();
+    currentPiece.position.set(0, FIELD_HEIGHT / 2 - 0.5, 0); // フィールド上部中央に配置
+    scene.add(currentPiece);
+}
+
+// --- 初期ピースの生成 ---
+spawnNewPiece();
+
 
 // --- UI要素の取得 ---
 const guideXPlus = document.getElementById('guide-x-plus')!;
@@ -127,6 +136,7 @@ const guidePoints = {
 };
 
 document.addEventListener('keydown', (event) => {
+    if (!currentPiece) return; // 操作対象のピースがない場合は何もしない
     // 移動と回転で別々に処理
     handleMovement(event.key);
     handleRotation(event.key);
@@ -144,6 +154,7 @@ document.addEventListener('keyup', (event) => {
 
 // --- 移動処理 ---
 function handleMovement(key: string) {
+    if (!currentPiece) return;
     const dx = (key === 'ArrowLeft') ? -1 : (key === 'ArrowRight') ? 1 : 0;
     const dz = (key === 'ArrowUp') ? -1 : (key === 'ArrowDown') ? 1 : 0;
 
@@ -154,7 +165,7 @@ function handleMovement(key: string) {
     currentPiece.position.z += dz;
 
     // 移動後の位置がフィールド内かチェック
-    if (!isPieceInsideField()) {
+    if (isPieceCollision(currentPiece)) {
         // フィールド外なら元に戻す
         currentPiece.position.x -= dx;
         currentPiece.position.z -= dz;
@@ -163,6 +174,7 @@ function handleMovement(key: string) {
 
 // --- 回転処理 ---
 function handleRotation(key: string) {
+    if (!currentPiece) return;
     const axis = new THREE.Vector3();
     let angle = Math.PI / 2; // 90度
 
@@ -186,7 +198,7 @@ function handleRotation(key: string) {
     }
 
     // 回転後に壁や床を突き抜けていないかチェック
-    if (!isPieceInsideField()) {
+    if (isPieceCollision(currentPiece)) {
         // 突き抜けていたら回転を元に戻す
         for (let i = 0; i < currentPiece.children.length; i++) {
             currentPiece.children[i].position.copy(oldLocalPositions[i]);
@@ -194,108 +206,94 @@ function handleRotation(key: string) {
     }
 }
 
-// --- グローバル座標でのだんごの位置を取得 ---
-function getDangoWorldPositions(piece: THREE.Group): THREE.Vector3[] {
-    const positions: THREE.Vector3[] = [];
-    for (const dango of piece.children) {
-        positions.push(dango.getWorldPosition(new THREE.Vector3()));
-    }
-    return positions;
-}
+// --- ピースを分解して個別の落下だんごにする ---
+function releasePiece() {
+    if (!currentPiece) return;
 
-// --- ピースがフィールド内にあるかチェック ---
-function isPieceInsideField(): boolean {
-    const halfWidth = FIELD_WIDTH / 2;
-    const halfDepth = FIELD_DEPTH / 2;
-    const halfHeight = FIELD_HEIGHT / 2;
-
-    const worldPositions = getDangoWorldPositions(currentPiece);
-
-    for (const pos of worldPositions) {
-        // X軸方向のチェック
-        if (pos.x < -halfWidth + 0.5 || pos.x > halfWidth - 0.5) {
-            return false;
-        }
-        // Z軸方向のチェック
-        if (pos.z < -halfDepth + 0.5 || pos.z > halfDepth - 0.5) {
-            return false;
-        }
-        // Y軸方向のチェック (床より下)
-        if (pos.y < -halfHeight + 0.5) {
-            return false;
-        }
-    }
-    return true;
-}
-
-// --- ピースをフィールドに固定する ---
-function lockPiece() {
-    // currentPieceから個々のだんごを取り外し、シーンに直接追加
-    // その際、だんごのワールド座標を正確に設定する
-    const dangosToLock: THREE.Mesh[] = [];
     while (currentPiece.children.length > 0) {
         const dango = currentPiece.children[0] as THREE.Mesh;
         
         // だんごの現在のワールド座標を取得
         const worldPos = dango.getWorldPosition(new THREE.Vector3());
-
+        
         // currentPieceからだんごを削除
         currentPiece.remove(dango);
         
-        // だんごのpositionをワールド座標に設定し、グリッドにスナップさせる
+        // だんごのpositionをワールド座標に設定し、シーンに直接追加
         dango.position.copy(worldPos);
-        dango.position.x = Math.round(dango.position.x);
-        dango.position.y = Math.round(dango.position.y * 2) / 2; // 0.5単位でスナップ
-
-        // シーンに直接追加
         scene.add(dango);
-        dangosToLock.push(dango);
+        
+        // 落下だんごリストに追加
+        fallingDangos.push(dango);
     }
 
-    // fieldGridにだんごを登録
-    for (const dango of dangosToLock) {
-        const x = Math.round(dango.position.x + FIELD_WIDTH / 2 - 0.5);
-        const y = Math.round(dango.position.y + FIELD_HEIGHT / 2 - 0.5);
-        const z = Math.round(dango.position.z + FIELD_DEPTH / 2 - 0.5);
-
-        // 座標がグリッド範囲内であることを確認してから登録
-        if (x >= 0 && x < FIELD_WIDTH && y >= 0 && y < FIELD_HEIGHT && z >= 0 && z < FIELD_DEPTH) {
-            fieldGrid[x][y][z] = dango;
-        } else {
-            console.warn("Locked dango out of grid bounds:", x, y, z);
-        }
-    }
-
-    // 新しいピースを生成して配置
-    currentPiece = createDangoPiece();
-    currentPiece.position.set(0, FIELD_HEIGHT / 2 - 0.5, 0); // 初期スポーン位置
-    scene.add(currentPiece);
+    // 元のピースは不要なのでシーンから削除
+    scene.remove(currentPiece);
+    currentPiece = null;
 }
 
-// --- 衝突判定 ---
-function isCollision(piece: THREE.Group, dx = 0, dy = 0, dz = 0): boolean {
+// --- 個別のだんごをフィールドに固定する ---
+function lockDango(dango: THREE.Mesh) {
+    // グリッド座標に変換
+    const x = Math.round(dango.position.x + FIELD_WIDTH / 2 - 0.5);
+    const y = Math.round(dango.position.y + FIELD_HEIGHT / 2 - 0.5);
+    const z = Math.round(dango.position.z + FIELD_DEPTH / 2 - 0.5);
+
+    // 座標がグリッド範囲内であることを確認してから登録
+    if (x >= 0 && x < FIELD_WIDTH && y >= 0 && y < FIELD_HEIGHT && z >= 0 && z < FIELD_DEPTH) {
+        fieldGrid[x][y][z] = dango;
+    } else {
+        // フィールド外に固定されようとした場合は、そのだんごを消してしまう（エラー処理）
+        console.warn("Attempted to lock dango out of bounds. Removing dango.", {x, y, z});
+        scene.remove(dango);
+    }
+
+    // 落下リストから削除
+    const index = fallingDangos.indexOf(dango);
+    if (index > -1) {
+        fallingDangos.splice(index, 1);
+    }
+}
+
+// --- ピース全体の衝突判定 ---
+function isPieceCollision(piece: THREE.Group, dx = 0, dy = 0, dz = 0): boolean {
+    for (const dango of piece.children) {
+        const worldPos = dango.getWorldPosition(new THREE.Vector3());
+        const checkPos = worldPos.add(new THREE.Vector3(dx, dy, dz));
+        if (isDangoCollision(checkPos)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// --- だんご単体の衝突判定 ---
+function isDangoCollision(position: THREE.Vector3): boolean {
     const halfWidth = FIELD_WIDTH / 2;
     const halfDepth = FIELD_DEPTH / 2;
     const halfHeight = FIELD_HEIGHT / 2;
 
-    for (const dango of piece.children) {
-        const worldPos = dango.getWorldPosition(new THREE.Vector3());
-        const nextX = Math.round(worldPos.x + dx + FIELD_WIDTH / 2 - 0.5);
-        const nextY = Math.round(worldPos.y + dy + FIELD_HEIGHT / 2 - 0.5);
-        const nextZ = Math.round(worldPos.z + dz + FIELD_DEPTH / 2 - 0.5);
+    // グリッド座標に変換
+    const gridX = Math.round(position.x + halfWidth - 0.5);
+    const gridY = Math.round(position.y + halfHeight - 0.5);
+    const gridZ = Math.round(position.z + halfDepth - 0.5);
 
-        // フィールドの境界チェック
-        if (nextX < 0 || nextX >= FIELD_WIDTH ||
-            nextY < 0 || nextY >= FIELD_HEIGHT ||
-            nextZ < 0 || nextZ >= FIELD_DEPTH) {
-            return true; // 境界外は衝突とみなす
-        }
-
-        // 既存のだんごとの衝突チェック
-        if (fieldGrid[nextX][nextY][nextZ] !== null) {
-            return true; // 既存のだんごに衝突
-        }
+    // 1. フィールドの境界チェック
+    // Y座標は0未満（床より下）のみチェック
+    if (gridX < 0 || gridX >= FIELD_WIDTH || gridY < 0 || gridZ < 0 || gridZ >= FIELD_DEPTH) {
+        return true;
     }
+    // Y座標の上限はゲームオーバー判定などで別途必要になる可能性あり
+
+    // 2. 既存のだんごとの衝突チェック
+    // グリッドの範囲外（特にYの上）はチェックしない
+    if (gridY >= FIELD_HEIGHT) {
+        return false;
+    }
+    if (fieldGrid[gridX][gridY] && fieldGrid[gridX][gridY][gridZ] !== null) {
+        return true;
+    }
+
     return false;
 }
 
@@ -312,14 +310,36 @@ function animate(currentTime: DOMHighResTimeStamp) {
   requestAnimationFrame(animate);
   controls.update(); // カメラコントロールを更新
 
-  // だんごの自動落下処理
-  const fallSpeed = isSoftDropping ? FALL_INTERVAL / SOFT_DROP_MULTIPLIER : FALL_INTERVAL;
+  const fallSpeed = isSoftDropping && currentPiece ? FALL_INTERVAL / SOFT_DROP_MULTIPLIER : FALL_INTERVAL;
+
   if (currentTime - lastFallTime > fallSpeed) {
-      if (!isCollision(currentPiece, 0, -1, 0)) { // 1マス下に衝突しないかチェック
-          currentPiece.position.y -= 1; // 1マス落下
-      } else {
-          lockPiece(); // 衝突したら固定
+      // --- 操作中のピースの落下処理 ---
+      if (currentPiece) {
+          if (!isPieceCollision(currentPiece, 0, -1, 0)) {
+              currentPiece.position.y -= 1;
+          } else {
+              releasePiece(); // 接地したら分解
+          }
       }
+
+      // --- 個別落下中のだんごの処理 ---
+      // forループ内で要素を削除するとインデックスがずれるため、逆順にループする
+      for (let i = fallingDangos.length - 1; i >= 0; i--) {
+          const dango = fallingDangos[i];
+          const nextPos = dango.position.clone().add(new THREE.Vector3(0, -1, 0));
+          
+          if (!isDangoCollision(nextPos)) {
+              dango.position.y -= 1;
+          } else {
+              lockDango(dango); // 接地したら固定
+          }
+      }
+      
+      // --- 新しいピースの生成判定 ---
+      if (currentPiece === null && fallingDangos.length === 0) {
+          spawnNewPiece();
+      }
+
       lastFallTime = currentTime;
   }
 
